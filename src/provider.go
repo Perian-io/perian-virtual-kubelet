@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -17,7 +16,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 func NewProvider(
@@ -27,6 +25,7 @@ func NewProvider(
 	org string,
 	token string,
 	kubeletPort int32,
+	kubeClient *kubernetes.Clientset,
 ) (*Provider, error) {
 	lbls := map[string]string{
 		"alpha.service-controller.kubernetes.io/exclude-balancer": "true",
@@ -87,6 +86,7 @@ func NewProvider(
 		node:            &node,
 		kubeletPort:     kubeletPort,
 		internalIP:      "127.0.0.1",
+		clientSet:       kubeClient,
 	}
 	provider.perianPods = make(map[string]PerianPod)
 	return &provider, nil
@@ -96,8 +96,7 @@ func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	specs := pod.Spec
 	container := specs.Containers[0]
 	imageName := container.Image
-	containerName := container.Name
-	fullName := pod.Namespace + "/" + containerName
+	fullName := pod.Namespace + "/" + pod.Name
 
 	createJobAPI := p.jobClient.CreateJob(ctx)
 	createJobRequest := perian_client.NewCreateJobRequest()
@@ -193,12 +192,7 @@ func (p *Provider) GetPod(ctx context.Context, namespace, name string) (*corev1.
 }
 
 func (p *Provider) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
-	err := p.InitClientSet(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	err = p.RetrievePodsFromCluster(ctx)
+	err := p.RetrievePodsFromCluster(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -217,16 +211,29 @@ func (p *Provider) GetNode() *corev1.Node {
 
 func (p *Provider) NotifyNodeStatus(ctx context.Context, f func(*corev1.Node)) {
 	p.onNodeChangeCallback = f
-	go p.nodeUpdate()
+	go p.nodeUpdate(ctx)
 }
 
 func (p *Provider) Ping(ctx context.Context) error {
 	return nil
 }
 
-func (p *Provider) nodeUpdate() {
-	p.node.Status.Conditions = NodeCondition(true)
-	p.onNodeChangeCallback(p.node)
+func (p *Provider) nodeUpdate(ctx context.Context) {
+	t := time.NewTimer(5 * time.Second)
+	if !t.Stop() {
+		<-t.C
+	}
+
+	for {
+		t.Reset(30 * time.Second)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		p.node.Status.Conditions = NodeCondition(true)
+		p.onNodeChangeCallback(p.node)
+	}
 }
 
 func (p *Provider) GetLogs(ctx context.Context, namespace, podName, containerName string, opts api.ContainerLogOpts) (io.ReadCloser, error) {
@@ -478,23 +485,6 @@ func PodPhase(p Provider, phase string) (corev1.PodStatus, error) {
 
 func stringToReadCloser(s string) io.ReadCloser {
 	return io.NopCloser(strings.NewReader(s))
-}
-
-func (p *Provider) InitClientSet(ctx context.Context) error {
-	if p.clientSet == nil {
-		kubeconfig := os.Getenv("KUBECONFIG")
-
-		config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
-		if err != nil {
-			return err
-		}
-
-		p.clientSet, err = kubernetes.NewForConfig(config)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (p *Provider) RetrievePodsFromCluster(ctx context.Context) error {

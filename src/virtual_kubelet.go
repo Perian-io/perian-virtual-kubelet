@@ -2,7 +2,6 @@ package perian
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -23,68 +22,33 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	lease "k8s.io/client-go/kubernetes/typed/coordination/v1"
 	"k8s.io/client-go/rest"
-	cache "k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/record"
 )
 
 func RunPerianVirtualKubelet(ctx context.Context) {
-	perianConfig := LoadConfigFile(ctx)
 	InitLogger()
-	InitAndRunHTTPServer(perianConfig.KubeletPort)
+	perianConfig := LoadConfigFile(ctx)
+	mux := InitAndRunHTTPServer(ctx, perianConfig.KubeletPort)
 	kubeConfig := GetKubeConfig(ctx)
 	kubeClient := CreateKubeClient(kubeConfig)
-	provider := InitPerianProvider(perianConfig)
-	InitAndRunNodeController(ctx, provider, kubeClient, kubeConfig)
-	eventRecorder := InitEventRecorder(perianConfig.NodeName)
-	resyncDuration := InitResyncDuration()
-	podInformerFactory, scmInformerFactory := InitInformerFactories(
-		kubeClient,
-		resyncDuration,
-		perianConfig.NodeName,
-	)
-	podInformer, scmInformer := InitInformers(podInformerFactory, scmInformerFactory)
-	StartInformers(ctx, podInformerFactory, scmInformerFactory, podInformer, scmInformer)
-	InitAndRunPodController(ctx, kubeClient, provider, eventRecorder, podInformerFactory, scmInformerFactory)
-}
-
-func LoadConfig(ctx context.Context, configFile string) (config Config, err error) {
-	data, err := os.ReadFile(configFile)
-
-	if err != nil {
-		return config, err
+	nodeProvider := InitPerianProvider(ctx, perianConfig, kubeClient)
+	InitAndRunNodeController(ctx, nodeProvider, kubeClient, kubeConfig)
+	EventRecorder := InitEventRecorder(perianConfig.NodeName)
+	informerFactory := InitInformerFactories(kubeClient, perianConfig.NodeName)
+	podInformer := InitInformer(informerFactory)
+	podControllerConfig := InitPodControllerConfig(kubeClient, nodeProvider, EventRecorder, informerFactory)
+	stopper := make(chan struct{})
+	defer close(stopper)
+	go informerFactory.Start(stopper)
+	go podInformer.Run(stopper)
+	if !cache.WaitForCacheSync(stopper, informerFactory.Core().V1().Pods().Informer().HasSynced) {
+		log.G(ctx).Fatal(fmt.Errorf("timed out waiting for caches to sync"))
+		return
 	}
-
-	config = Config{}
-	err = yaml.Unmarshal(data, &config)
-
-	if err != nil {
-		return config, err
-	}
-
-	return config, nil
-}
-
-func ReadConfigPath() string {
-	flagPath := flag.String("configpath", "", "Path to the virtual kubelet config file.")
-	flag.Parse()
-	var configPath string
-	if *flagPath != "" {
-		configPath = *flagPath
-	} else {
-		panic(fmt.Errorf("You must specify a config file path."))
-	}
-	return configPath
-}
-
-func LoadConfigFile(ctx context.Context) Config {
-	configPath := ReadConfigPath()
-	config, err := LoadConfig(ctx, configPath)
-	if err != nil {
-		log.G(ctx).Error("cannot load config file at", configPath)
-		panic(fmt.Errorf(err.Error()))
-	}
-	return config
+	AttachPodHandlerRoutes(nodeProvider, mux)
+	RunPodController(ctx, podControllerConfig)
 }
 
 func InitLogger() {
@@ -93,7 +57,31 @@ func InitLogger() {
 	log.L = logruslogger.FromLogrus(logrus.NewEntry(logger))
 }
 
-func InitAndRunHTTPServer(kubeletPort int32) *http.ServeMux {
+func LoadConfig(ctx context.Context) (config Config, err error) {
+	configPath := os.Getenv("CONFIG")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return config, err
+	}
+	config = Config{}
+	err = yaml.Unmarshal(data, &config)
+
+	if err != nil {
+		return config, err
+	}
+	return config, nil
+}
+
+func LoadConfigFile(ctx context.Context) Config {
+	config, err := LoadConfig(ctx)
+	if err != nil {
+		log.G(ctx).Fatal("Can not load config file")
+		os.Exit(1)
+	}
+	return config
+}
+
+func InitAndRunHTTPServer(ctx context.Context, kubeletPort int32) *http.ServeMux {
 	mux := http.NewServeMux()
 	server := &http.Server{
 		Addr:              fmt.Sprintf("0.0.0.0:%d", kubeletPort),
@@ -102,14 +90,17 @@ func InitAndRunHTTPServer(kubeletPort int32) *http.ServeMux {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
-		if err := server.ListenAndServe(); err != nil {
+		log.G(ctx).Infof("Starting the virtual kubelet HTTP server listening on %q", server.Addr)
+		err := server.ListenAndServe()
+		if err != nil {
+			log.G(ctx).Fatal("Error running HTTP server: ", err.Error())
 			os.Exit(1)
 		}
 	}()
 	return mux
 }
 
-func InitPerianProvider(config Config) *Provider {
+func InitPerianProvider(ctx context.Context, config Config, kubeClient *kubernetes.Clientset) *Provider {
 	nodeProvider, err := NewProvider(
 		config.NodeName,
 		"linux",
@@ -117,9 +108,11 @@ func InitPerianProvider(config Config) *Provider {
 		config.PerianOrg,
 		config.PerianAuthToken,
 		config.KubeletPort,
+		kubeClient,
 	)
 	if err != nil {
-		panic(err.Error())
+		log.G(ctx).Fatal("Error creating a new provider object: ", err.Error())
+		os.Exit(1)
 	}
 	return nodeProvider
 }
@@ -161,16 +154,17 @@ func InitAndRunNodeController(
 	kubeClient *kubernetes.Clientset,
 	kubeConfig *rest.Config,
 ) {
-	nodeController := InitNodeController(provider, kubeClient, kubeConfig)
+	nodeController := InitNodeController(ctx, provider, kubeClient, kubeConfig)
 	go func() {
 		err := nodeController.Run(ctx)
 		if err != nil {
-			panic(fmt.Errorf(err.Error()))
+			log.G(ctx).Fatal("Error running node controller: ", err.Error())
+			os.Exit(1)
 		}
 	}()
 }
 
-func InitNodeController(provider *Provider, kubeClient *kubernetes.Clientset, kubecfg *rest.Config) *node.NodeController {
+func InitNodeController(ctx context.Context, provider *Provider, kubeClient *kubernetes.Clientset, kubecfg *rest.Config) *node.NodeController {
 	nodeController, err := node.NewNodeController(
 		provider,
 		provider.GetNode(),
@@ -181,14 +175,14 @@ func InitNodeController(provider *Provider, kubeClient *kubernetes.Clientset, ku
 		),
 	)
 	if err != nil {
-		panic(fmt.Errorf(err.Error()))
+		log.G(ctx).Fatal("Error initializing a new node controller: ", err.Error())
+		os.Exit(1)
 	}
 	return nodeController
 }
 
 func InitEventRecorder(nodeName string) record.EventRecorderLogger {
 	eventBroadcaster := record.NewBroadcaster()
-
 	eventRecorder := eventBroadcaster.NewRecorder(
 		scheme.Scheme,
 		corev1.EventSource{
@@ -198,23 +192,33 @@ func InitEventRecorder(nodeName string) record.EventRecorderLogger {
 	return eventRecorder
 }
 
-func InitInformerFactories(kubeClient *kubernetes.Clientset, resyncDuration time.Duration, nodeName string) (informers.SharedInformerFactory, informers.SharedInformerFactory) {
-	podInformerFactory := informers.NewSharedInformerFactoryWithOptions(
+func InitInformerFactories(
+	kubeClient *kubernetes.Clientset,
+	nodeName string,
+) informers.SharedInformerFactory {
+	resyncDuration, _ := time.ParseDuration("30s")
+
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(
 		kubeClient,
 		resyncDuration,
 		PodInformerFilter(nodeName),
 	)
-	scmInformerFactory := informers.NewSharedInformerFactoryWithOptions(
-		kubeClient,
-		resyncDuration,
-	)
-	return podInformerFactory, scmInformerFactory
+
+	return informerFactory
 }
 
-func InitResyncDuration() time.Duration {
+func InitInformer(
+	informerFactory informers.SharedInformerFactory,
+) cache.SharedIndexInformer {
+	podInformer := informerFactory.Core().V1().Pods().Informer()
+	return podInformer
+}
+
+func InitResyncDuration(ctx context.Context) time.Duration {
 	resyncDuration, err := time.ParseDuration("30s")
 	if err != nil {
-		panic(fmt.Errorf("couldn't parse duration"))
+		log.G(ctx).Fatal("Error parsing duration string: ", err.Error())
+		os.Exit(1)
 	}
 	return resyncDuration
 }
@@ -225,40 +229,7 @@ func PodInformerFilter(node string) informers.SharedInformerOption {
 	})
 }
 
-func InitInformers(podInformerFactory informers.SharedInformerFactory, scmInformerFactory informers.SharedInformerFactory) (cache.SharedIndexInformer, cache.SharedIndexInformer) {
-	scmInformer := scmInformerFactory.Core().V1().Secrets().Informer()
-	podInformer := podInformerFactory.Core().V1().Pods().Informer()
-	return scmInformer, podInformer
-}
-
-func StartInformers(
-	ctx context.Context,
-	podInformerFactory informers.SharedInformerFactory,
-	scmInformerFactory informers.SharedInformerFactory,
-	podInformer cache.SharedIndexInformer,
-	scmInformer cache.SharedIndexInformer,
-) {
-	stopper := make(chan struct{})
-	defer close(stopper)
-	go podInformerFactory.Start(stopper)
-	go scmInformerFactory.Start(stopper)
-	go scmInformer.Run(stopper)
-	go podInformer.Run(stopper)
-	if !cache.WaitForCacheSync(stopper, podInformerFactory.Core().V1().Pods().Informer().HasSynced) {
-		log.G(ctx).Fatal(fmt.Errorf("timed out waiting for caches to sync"))
-		return
-	}
-}
-
-func InitAndRunPodController(
-	ctx context.Context,
-	kubeClient *kubernetes.Clientset,
-	provider *Provider,
-	eventRecorder record.EventRecorder,
-	podInformerFactory informers.SharedInformerFactory,
-	scmInformerFactory informers.SharedInformerFactory,
-) {
-	config := InitPodControllerConfig(kubeClient, provider, eventRecorder, podInformerFactory, scmInformerFactory)
+func RunPodController(ctx context.Context, config node.PodControllerConfig) {
 	podController, err := node.NewPodController(config)
 	if err != nil {
 		log.G(ctx).Fatal(err)
@@ -273,17 +244,16 @@ func InitPodControllerConfig(
 	kubeClient *kubernetes.Clientset,
 	provider *Provider,
 	eventRecorder record.EventRecorder,
-	podInformerFactory informers.SharedInformerFactory,
-	scmInformerFactory informers.SharedInformerFactory,
+	informerFactory informers.SharedInformerFactory,
 ) node.PodControllerConfig {
 	config := node.PodControllerConfig{
 		PodClient:         kubeClient.CoreV1(),
 		Provider:          provider,
 		EventRecorder:     eventRecorder,
-		PodInformer:       podInformerFactory.Core().V1().Pods(),
-		SecretInformer:    scmInformerFactory.Core().V1().Secrets(),
-		ConfigMapInformer: scmInformerFactory.Core().V1().ConfigMaps(),
-		ServiceInformer:   scmInformerFactory.Core().V1().Services(),
+		PodInformer:       informerFactory.Core().V1().Pods(),
+		SecretInformer:    informerFactory.Core().V1().Secrets(),
+		ConfigMapInformer: informerFactory.Core().V1().ConfigMaps(),
+		ServiceInformer:   informerFactory.Core().V1().Services(),
 	}
 	return config
 }
@@ -294,10 +264,15 @@ func AttachPodHandlerRoutes(provider *Provider, mux *http.ServeMux) {
 }
 
 func InitPodHandlerConfig(provider *Provider) api.PodHandlerConfig {
-	config := api.PodHandlerConfig{
+	handlerPodConfig := api.PodHandlerConfig{
 		GetContainerLogs: provider.GetLogs,
-		GetStatsSummary:  provider.GetStatsSummary,
 		GetPods:          provider.GetPods,
+		GetStatsSummary:  provider.GetStatsSummary,
+	}
+	config := api.PodHandlerConfig{
+		GetContainerLogs: handlerPodConfig.GetContainerLogs,
+		GetStatsSummary:  handlerPodConfig.GetStatsSummary,
+		GetPods:          handlerPodConfig.GetPods,
 	}
 	return config
 }
