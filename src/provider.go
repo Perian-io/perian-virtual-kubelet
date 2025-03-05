@@ -26,6 +26,7 @@ func NewProvider(
 	token string,
 	kubeletPort int32,
 	kubeClient *kubernetes.Clientset,
+	internalIP string,
 ) (*Provider, error) {
 	lbls := map[string]string{
 		"alpha.service-controller.kubernetes.io/exclude-balancer": "true",
@@ -72,11 +73,9 @@ func NewProvider(
 				Architecture:    "virtual-kubelet",
 				OperatingSystem: "linux",
 			},
-			Addresses:       []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "127.0.0.1"}},
+			Addresses:       []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: internalIP}},
 			DaemonEndpoints: corev1.NodeDaemonEndpoints{KubeletEndpoint: corev1.DaemonEndpoint{Port: kubeletPort}},
 			Conditions:      NodeCondition(false),
-			Capacity:        GetResources(),
-			Allocatable:     GetResources(),
 		},
 	}
 
@@ -85,7 +84,7 @@ func NewProvider(
 		operatingSystem: operatingSystem,
 		node:            &node,
 		kubeletPort:     kubeletPort,
-		internalIP:      "127.0.0.1",
+		internalIP:      internalIP,
 		clientSet:       kubeClient,
 	}
 	provider.perianPods = make(map[string]PerianPod)
@@ -153,7 +152,7 @@ func (p *Provider) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 }
 
 func (p *Provider) DeletePod(ctx context.Context, pod *corev1.Pod) error {
-	fullName := pod.Namespace + "/" + pod.Spec.Containers[0].Name
+	fullName := pod.Namespace + "/" + pod.Name
 	perianJobId := p.perianPods[fullName].jobId
 	cancelJobAPI := p.jobClient.CancelJob(ctx, perianJobId)
 	response, _, err := cancelJobAPI.Execute()
@@ -276,90 +275,92 @@ func (p *Provider) statusLoop(ctx context.Context) {
 		for _, perianPod := range p.perianPods {
 			jobId = perianPod.jobId
 			pod = perianPod.pod
-			p.UpdatePod(ctx, pod)
-			jobResponse, _, err := p.jobClient.GetJobById(ctx, jobId).Execute()
-			if *jobResponse.StatusCode != 200 || err != nil {
-				log.Errorf(ctx, "couldn't get job id %s", jobId)
-			}
-			jobStatus := jobResponse.Jobs[0].Status
-			if *jobStatus == perian_client.JOBSTATUS_CANCELLED {
-				pod.Status, err = PodPhase(*p, "Failed")
-				pod.Status.ContainerStatuses = []corev1.ContainerStatus{
-					{
-						Name:         pod.Spec.Containers[0].Name,
-						Image:        pod.Spec.Containers[0].Image,
-						Ready:        false,
-						RestartCount: 0,
-						State: corev1.ContainerState{
-							Terminated: &corev1.ContainerStateTerminated{
-								Reason: "Job is cancelled",
+			if pod.Status.Phase != corev1.PodSucceeded {
+				jobResponse, _, err := p.jobClient.GetJobById(ctx, jobId).Execute()
+				if *jobResponse.StatusCode != 200 || err != nil {
+					log.Errorf(ctx, "couldn't get job id %s", jobId)
+				}
+				jobStatus := jobResponse.Jobs[0].Status
+				if *jobStatus == perian_client.JOBSTATUS_CANCELLED {
+					pod.Status, err = PodPhase(*p, "Failed")
+					pod.Status.ContainerStatuses = []corev1.ContainerStatus{
+						{
+							Name:         pod.Spec.Containers[0].Name,
+							Image:        pod.Spec.Containers[0].Image,
+							Ready:        false,
+							RestartCount: 0,
+							State: corev1.ContainerState{
+								Terminated: &corev1.ContainerStateTerminated{
+									Reason: "Job is cancelled",
+								},
 							},
 						},
-					},
-				}
+					}
 
-			} else if *jobStatus == perian_client.JOBSTATUS_SERVER_ERROR || *jobStatus == perian_client.JOBSTATUS_USER_ERROR {
-				pod.Status, err = PodPhase(*p, "Failed")
-				pod.Status.ContainerStatuses = []corev1.ContainerStatus{
-					{
-						Name:         pod.Spec.Containers[0].Name,
-						Image:        pod.Spec.Containers[0].Image,
-						Ready:        false,
-						RestartCount: 0,
-						State: corev1.ContainerState{
-							Terminated: &corev1.ContainerStateTerminated{
-								Reason: "Job resulted in an error",
+				} else if *jobStatus == perian_client.JOBSTATUS_SERVER_ERROR || *jobStatus == perian_client.JOBSTATUS_USER_ERROR {
+					pod.Status, err = PodPhase(*p, "Failed")
+					pod.Status.ContainerStatuses = []corev1.ContainerStatus{
+						{
+							Name:         pod.Spec.Containers[0].Name,
+							Image:        pod.Spec.Containers[0].Image,
+							Ready:        false,
+							RestartCount: 0,
+							State: corev1.ContainerState{
+								Terminated: &corev1.ContainerStateTerminated{
+									Reason: "Job resulted in an error",
+								},
 							},
 						},
-					},
-				}
-			} else if *jobStatus == perian_client.JOBSTATUS_INITIALIZING || *jobStatus == perian_client.JOBSTATUS_QUEUED {
-				pod.Status, err = PodPhase(*p, "Pending")
-				pod.Status.ContainerStatuses = []corev1.ContainerStatus{
-					{
-						Name:         pod.Spec.Containers[0].Name,
-						Image:        pod.Spec.Containers[0].Image,
-						Ready:        false,
-						RestartCount: 0,
-						State: corev1.ContainerState{
-							Waiting: &corev1.ContainerStateWaiting{
-								Reason: "Job is initializing",
+					}
+				} else if *jobStatus == perian_client.JOBSTATUS_INITIALIZING || *jobStatus == perian_client.JOBSTATUS_QUEUED {
+					pod.Status, err = PodPhase(*p, "Pending")
+					pod.Status.ContainerStatuses = []corev1.ContainerStatus{
+						{
+							Name:         pod.Spec.Containers[0].Name,
+							Image:        pod.Spec.Containers[0].Image,
+							Ready:        false,
+							RestartCount: 0,
+							State: corev1.ContainerState{
+								Waiting: &corev1.ContainerStateWaiting{
+									Reason: "Job is initializing",
+								},
 							},
 						},
-					},
-				}
-			} else if *jobStatus == perian_client.JOBSTATUS_RUNNING {
-				pod.Status, err = PodPhase(*p, "Running")
-				pod.Status.ContainerStatuses = []corev1.ContainerStatus{
-					{
-						Name:         pod.Spec.Containers[0].Name,
-						Image:        pod.Spec.Containers[0].Image,
-						Ready:        false,
-						RestartCount: 0,
-						State: corev1.ContainerState{
-							Running: &corev1.ContainerStateRunning{
-								StartedAt: metav1.Now(),
+					}
+				} else if *jobStatus == perian_client.JOBSTATUS_RUNNING {
+					pod.Status, err = PodPhase(*p, "Running")
+					pod.Status.ContainerStatuses = []corev1.ContainerStatus{
+						{
+							Name:         pod.Spec.Containers[0].Name,
+							Image:        pod.Spec.Containers[0].Image,
+							Ready:        false,
+							RestartCount: 0,
+							State: corev1.ContainerState{
+								Running: &corev1.ContainerStateRunning{
+									StartedAt: metav1.Now(),
+								},
 							},
 						},
-					},
-				}
-			} else if *jobStatus == perian_client.JOBSTATUS_DONE {
-				pod.Status, err = PodPhase(*p, "Running")
-				pod.Status.ContainerStatuses = []corev1.ContainerStatus{
-					{
-						Name:         pod.Spec.Containers[0].Name,
-						Image:        pod.Spec.Containers[0].Image,
-						Ready:        true,
-						RestartCount: 0,
-						State: corev1.ContainerState{
-							Terminated: &corev1.ContainerStateTerminated{
-								StartedAt:  metav1.Time{*jobResponse.Jobs[0].CreatedAt},
-								FinishedAt: metav1.Now(),
-								ExitCode:   0,
+					}
+				} else if *jobStatus == perian_client.JOBSTATUS_DONE {
+					pod.Status, _ = PodPhase(*p, "Ready")
+					pod.Status.ContainerStatuses = []corev1.ContainerStatus{
+						{
+							Name:         pod.Spec.Containers[0].Name,
+							Image:        pod.Spec.Containers[0].Image,
+							Ready:        true,
+							RestartCount: 0,
+							State: corev1.ContainerState{
+								Terminated: &corev1.ContainerStateTerminated{
+									StartedAt:  metav1.Time{*jobResponse.Jobs[0].CreatedAt},
+									FinishedAt: metav1.Now(),
+									ExitCode:   0,
+								},
 							},
 						},
-					},
+					}
 				}
+				p.UpdatePod(ctx, pod)
 			}
 		}
 	}

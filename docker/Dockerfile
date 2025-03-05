@@ -1,5 +1,5 @@
 # Stage 1: Build the application with Go
-FROM golang:1.23 as build-stage
+FROM golang:1.23 AS build-stage
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ ARG VERSION
 RUN CGO_ENABLED=0 GOOS=linux go build -o ./bin/vk ./src/cmd/virtual-kubelet/main.go
 
 # Stage 2: Prepare the runtime environment
-FROM ubuntu:22.04 as build-release-stage
+FROM ubuntu:22.04 AS build-release-stage
 
 # Install kubectl and dependencies for the app to run
 RUN apt-get update && \
@@ -31,7 +31,7 @@ COPY --from=build-stage /app/bin/vk /vk
 COPY --from=bitnami/kubectl:1.27.14 /opt/bitnami/kubectl/bin/kubectl /usr/local/bin/
 
 # Final image is lean, remove unnecessary tools
-FROM scratch as final-stage
+FROM scratch AS final-stage
 
 # Copy necessary files from build-release-stage
 COPY --from=build-release-stage /vk /vk

@@ -12,6 +12,7 @@ type Config struct {
 	PerianAuthToken string `yaml:"PerianAuthToken"`
 	KubeletPort     int32  `yaml:"KubeletPort"`
 	NodeName        string `yaml:"NodeName"`
+	InternalIP      string `yaml:"InternalIP"`
 }
 
 type Provider struct {

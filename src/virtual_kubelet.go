@@ -37,12 +37,10 @@ func RunPerianVirtualKubelet(ctx context.Context) {
 	InitAndRunNodeController(ctx, nodeProvider, kubeClient, kubeConfig)
 	EventRecorder := InitEventRecorder(perianConfig.NodeName)
 	informerFactory := InitInformerFactories(kubeClient, perianConfig.NodeName)
-	podInformer := InitInformer(informerFactory)
 	podControllerConfig := InitPodControllerConfig(kubeClient, nodeProvider, EventRecorder, informerFactory)
 	stopper := make(chan struct{})
 	defer close(stopper)
 	go informerFactory.Start(stopper)
-	go podInformer.Run(stopper)
 	if !cache.WaitForCacheSync(stopper, informerFactory.Core().V1().Pods().Informer().HasSynced) {
 		log.G(ctx).Fatal(fmt.Errorf("timed out waiting for caches to sync"))
 		return
@@ -68,6 +66,12 @@ func LoadConfig(ctx context.Context) (config Config, err error) {
 
 	if err != nil {
 		return config, err
+	}
+
+	podIp := os.Getenv("POD_IP")
+
+	if podIp != "" {
+		config.InternalIP = podIp
 	}
 	return config, nil
 }
@@ -109,6 +113,7 @@ func InitPerianProvider(ctx context.Context, config Config, kubeClient *kubernet
 		config.PerianAuthToken,
 		config.KubeletPort,
 		kubeClient,
+		config.InternalIP,
 	)
 	if err != nil {
 		log.G(ctx).Fatal("Error creating a new provider object: ", err.Error())
@@ -205,13 +210,6 @@ func InitInformerFactories(
 	)
 
 	return informerFactory
-}
-
-func InitInformer(
-	informerFactory informers.SharedInformerFactory,
-) cache.SharedIndexInformer {
-	podInformer := informerFactory.Core().V1().Pods().Informer()
-	return podInformer
 }
 
 func InitResyncDuration(ctx context.Context) time.Duration {
