@@ -13,7 +13,7 @@ COPY . .
 
 # Build the binary
 ARG VERSION
-RUN CGO_ENABLED=0 GOOS=linux go build -o ./bin/vk ./src/cmd/virtual-kubelet/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o ./bin/vk ./src/cmd/main.go
 
 # Stage 2: Prepare the runtime environment
 FROM ubuntu:22.04 AS build-release-stage

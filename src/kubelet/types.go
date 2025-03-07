@@ -31,3 +31,16 @@ type PerianPod struct {
 	jobId string
 	pod   *corev1.Pod
 }
+
+type DockerSecret struct {
+	registryURL string
+	username    string
+	password    string
+}
+
+type JobResources struct {
+	cpu             int32
+	memory          string
+	accelerators    int32
+	acceleratorType string
+}

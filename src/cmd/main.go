@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 
-	perian "github.com/Perian-io/perian-virtual-kubelet/src"
+	perian "github.com/Perian-io/perian-virtual-kubelet/src/kubelet"
 )
 
 func main() {
