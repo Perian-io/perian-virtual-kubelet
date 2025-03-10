@@ -27,6 +27,10 @@ import (
 	"k8s.io/client-go/tools/record"
 )
 
+// RunPerianVirtualKubelet runs the virtual Kubelet webserver.
+//
+// It fetches the Perian VK config file and the Kubernetes cluster config and initializes a virtual Kubernetes node,
+// runs Kubernetes PodController and Informers.
 func RunPerianVirtualKubelet(ctx context.Context) {
 	InitLogger()
 	perianConfig := LoadConfigFile(ctx)
@@ -36,7 +40,7 @@ func RunPerianVirtualKubelet(ctx context.Context) {
 	nodeProvider := InitPerianProvider(ctx, perianConfig, kubeClient)
 	InitAndRunNodeController(ctx, nodeProvider, kubeClient, kubeConfig)
 	EventRecorder := InitEventRecorder(perianConfig.NodeName)
-	informerFactory := InitInformerFactories(kubeClient, perianConfig.NodeName)
+	informerFactory := InitInformerFactory(kubeClient, perianConfig.NodeName)
 	podControllerConfig := InitPodControllerConfig(kubeClient, nodeProvider, EventRecorder, informerFactory)
 	stopper := make(chan struct{})
 	defer close(stopper)
@@ -49,12 +53,14 @@ func RunPerianVirtualKubelet(ctx context.Context) {
 	RunPodController(ctx, podControllerConfig)
 }
 
+// InitLogger initializes the logger and sets logging level to debug.
 func InitLogger() {
 	logger := logrus.StandardLogger()
 	logger.SetLevel(logrus.DebugLevel)
 	log.L = logruslogger.FromLogrus(logrus.NewEntry(logger))
 }
 
+// LoadConfig loads the Perian VK configuration and checks if VK is running in a Pod then it assigns it the Pod IP.
 func LoadConfig(ctx context.Context) (config Config, err error) {
 	configPath := os.Getenv("CONFIG")
 	data, err := os.ReadFile(configPath)
@@ -76,6 +82,7 @@ func LoadConfig(ctx context.Context) (config Config, err error) {
 	return config, nil
 }
 
+// LoadConfigFile loads the Perian VK configurations and checks if an error has occured.
 func LoadConfigFile(ctx context.Context) Config {
 	config, err := LoadConfig(ctx)
 	if err != nil {
@@ -85,6 +92,7 @@ func LoadConfigFile(ctx context.Context) Config {
 	return config
 }
 
+// InitAndRunHTTPServer creates and runs an HTTP server to handle requests from the Kubernetes controllers.
 func InitAndRunHTTPServer(ctx context.Context, kubeletPort int32) *http.ServeMux {
 	mux := http.NewServeMux()
 	server := &http.Server{
@@ -104,6 +112,8 @@ func InitAndRunHTTPServer(ctx context.Context, kubeletPort int32) *http.ServeMux
 	return mux
 }
 
+// InitPerianProvider Creates a Perian provider object and assigns it a local Kubernetes client and the data fetched from
+// the Perian VK configurations.
 func InitPerianProvider(ctx context.Context, config Config, kubeClient *kubernetes.Clientset) *Provider {
 	nodeProvider, err := NewProvider(
 		config.NodeName,
@@ -122,37 +132,40 @@ func InitPerianProvider(ctx context.Context, config Config, kubeClient *kubernet
 	return nodeProvider
 }
 
+// GetKubeConfig fetches the Kubernetes cluster configurations.
 func GetKubeConfig(ctx context.Context) *rest.Config {
-	var kubecfg *rest.Config
-	kubecfgFile, err := os.ReadFile(os.Getenv("KUBECONFIG"))
+	var kubeConfig *rest.Config
+	kubeConfigFile, err := os.ReadFile(os.Getenv("KUBECONFIG"))
 	if err != nil {
 		if os.Getenv("KUBECONFIG") != "" {
 			log.G(ctx).Debug(err)
 		}
 		log.G(ctx).Info("Trying InCluster configuration")
 
-		kubecfg, err = rest.InClusterConfig()
+		kubeConfig, err = rest.InClusterConfig()
 		if err != nil {
 			log.G(ctx).Fatal(err)
 		}
 	} else {
 		log.G(ctx).Debug("Loading Kubeconfig from " + os.Getenv("KUBECONFIG"))
-		clientCfg, err := clientcmd.NewClientConfigFromBytes(kubecfgFile)
+		clientCfg, err := clientcmd.NewClientConfigFromBytes(kubeConfigFile)
 		if err != nil {
 			log.G(ctx).Fatal(err)
 		}
-		kubecfg, err = clientCfg.ClientConfig()
+		kubeConfig, err = clientCfg.ClientConfig()
 		if err != nil {
 			log.G(ctx).Fatal(err)
 		}
 	}
-	return kubecfg
+	return kubeConfig
 }
 
+// CreateKubeClient creates a local Kubernetes client.
 func CreateKubeClient(kubeConfig *rest.Config) *kubernetes.Clientset {
 	return kubernetes.NewForConfigOrDie(kubeConfig)
 }
 
+// InitAndRunNodeController initializes and runs a Kubernetes node controller.
 func InitAndRunNodeController(
 	ctx context.Context,
 	provider *Provider,
@@ -169,6 +182,7 @@ func InitAndRunNodeController(
 	}()
 }
 
+// InitNodeController initializes a node controller for the VK node.
 func InitNodeController(ctx context.Context, provider *Provider, kubeClient *kubernetes.Clientset, kubecfg *rest.Config) *node.NodeController {
 	nodeController, err := node.NewNodeController(
 		provider,
@@ -186,6 +200,7 @@ func InitNodeController(ctx context.Context, provider *Provider, kubeClient *kub
 	return nodeController
 }
 
+// InitEventRecorder initializes and returns a Kubernetes event recorder.
 func InitEventRecorder(nodeName string) record.EventRecorderLogger {
 	eventBroadcaster := record.NewBroadcaster()
 	eventRecorder := eventBroadcaster.NewRecorder(
@@ -197,7 +212,8 @@ func InitEventRecorder(nodeName string) record.EventRecorderLogger {
 	return eventRecorder
 }
 
-func InitInformerFactories(
+// InitInformerFactory initializes and returns a Kubernetes informer factory.
+func InitInformerFactory(
 	kubeClient *kubernetes.Clientset,
 	nodeName string,
 ) informers.SharedInformerFactory {
@@ -212,6 +228,7 @@ func InitInformerFactories(
 	return informerFactory
 }
 
+// InitResyncDuration initializes and returns the resync duration for the informer facotry.
 func InitResyncDuration(ctx context.Context) time.Duration {
 	resyncDuration, err := time.ParseDuration("30s")
 	if err != nil {
@@ -221,12 +238,14 @@ func InitResyncDuration(ctx context.Context) time.Duration {
 	return resyncDuration
 }
 
+// PodInformerFilter creates a filter to select a node by name for the informer factory.
 func PodInformerFilter(node string) informers.SharedInformerOption {
 	return informers.WithTweakListOptions(func(options *metav1.ListOptions) {
 		options.FieldSelector = fields.OneTermEqualSelector("spec.nodeName", node).String()
 	})
 }
 
+// RunPodController creates and runs a new PodController.
 func RunPodController(ctx context.Context, config node.PodControllerConfig) {
 	podController, err := node.NewPodController(config)
 	if err != nil {
@@ -238,6 +257,7 @@ func RunPodController(ctx context.Context, config node.PodControllerConfig) {
 	}
 }
 
+// InitPodControllerConfig initializes the configurations for a PodController.
 func InitPodControllerConfig(
 	kubeClient *kubernetes.Clientset,
 	provider *Provider,
@@ -256,21 +276,17 @@ func InitPodControllerConfig(
 	return config
 }
 
+// AttachPodHandlerRoutes attaches the PodHandler routes to the running HTTP server.
 func AttachPodHandlerRoutes(provider *Provider, mux *http.ServeMux) {
 	config := InitPodHandlerConfig(provider)
 	api.AttachPodRoutes(config, mux, true)
 }
 
+// InitPodHandlerConfig initializes a PodHandler configurations.
 func InitPodHandlerConfig(provider *Provider) api.PodHandlerConfig {
-	handlerPodConfig := api.PodHandlerConfig{
+	config := api.PodHandlerConfig{
 		GetContainerLogs: provider.GetLogs,
 		GetPods:          provider.GetPods,
-		GetStatsSummary:  provider.GetStatsSummary,
-	}
-	config := api.PodHandlerConfig{
-		GetContainerLogs: handlerPodConfig.GetContainerLogs,
-		GetStatsSummary:  handlerPodConfig.GetStatsSummary,
-		GetPods:          handlerPodConfig.GetPods,
 	}
 	return config
 }
