@@ -117,3 +117,7 @@ data:
   username: "base64_encoded_username"
   password: "base64_encoded_password"
 ```
+
+```bash
+kubectl apply -f secret.yaml
+```
