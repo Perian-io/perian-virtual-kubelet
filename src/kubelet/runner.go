@@ -128,6 +128,7 @@ func InitPerianProvider(ctx context.Context, config Config, kubeClient *kubernet
 		config.KubeletPort,
 		kubeClient,
 		config.InternalIP,
+		config.KubernetesSecretName,
 	)
 	if err != nil {
 		log.G(ctx).Fatal("Error creating a new provider object: ", err.Error())

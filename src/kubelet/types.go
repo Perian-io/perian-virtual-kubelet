@@ -8,12 +8,13 @@ import (
 
 // Config represents the Perian Virtual Kubelet configurations.
 type Config struct {
-	PerianServerURL string `yaml:"PerianServerURL"`
-	PerianOrg       string `yaml:"PerianOrg"`
-	PerianAuthToken string `yaml:"PerianAuthToken"`
-	KubeletPort     int32  `yaml:"KubeletPort"`
-	NodeName        string `yaml:"NodeName"`
-	InternalIP      string `yaml:"InternalIP"`
+	PerianServerURL      string `yaml:"PerianServerURL"`
+	PerianOrg            string `yaml:"PerianOrg"`
+	PerianAuthToken      string `yaml:"PerianAuthToken"`
+	KubeletPort          int32  `yaml:"KubeletPort"`
+	NodeName             string `yaml:"NodeName"`
+	InternalIP           string `yaml:"InternalIP"`
+	KubernetesSecretName string `yaml:"KubernetesSecretName"`
 }
 
 // Provider represents the Virtual Kubelet (VK) provider struct which holds the data necessary for running the VK
@@ -28,6 +29,7 @@ type Provider struct {
 	notifier             func(*corev1.Pod)
 	perianPods           map[string]PerianPod
 	clientSet            *kubernetes.Clientset
+	kubernetesSecretName string
 }
 
 // PerianPod represents a pod and its jobId which runs on the Perian sky platform.

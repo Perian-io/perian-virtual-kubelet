@@ -26,13 +26,14 @@ func NewProvider(
 	kubeletPort int32,
 	kubeClient *kubernetes.Clientset,
 	internalIP string,
+	kubernetesSecretName string,
 ) (*Provider, error) {
 
 	labels := GetProviderNodeLabels(nodeName)
 	jobClient := InitPerianJobClient(url, token, organization)
 	taints := GetNodeTaints()
 	node := CreateKubeNode(nodeName, labels, taints, internalIP, kubeletPort)
-	provider := InitProvider(jobClient, operatingSystem, node, kubeletPort, internalIP, kubeClient)
+	provider := InitProvider(jobClient, operatingSystem, node, kubeletPort, internalIP, kubeClient, kubernetesSecretName)
 	return &provider, nil
 }
 
@@ -43,7 +44,7 @@ func NewProvider(
 func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	imageName := GetPodImageName(pod)
 	fullName := GeneratePodKey(pod)
-	dockerSecret, _ := GetDockerSecrets(ctx, p.clientSet)
+	dockerSecret, _ := GetDockerSecrets(ctx, p.clientSet, p.kubernetesSecretName)
 	jobResources := GetJobResources(pod)
 	jobId, err := CreatePerianJob(ctx, p.jobClient, imageName, dockerSecret, jobResources)
 	if err != nil {

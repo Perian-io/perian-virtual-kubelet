@@ -36,12 +36,13 @@ make build-docker
 ### 3. Create a Perian config yaml file
 
 ```yaml
-PerianServerURL: "server-url"
+PerianServerURL: "https://api.perian.cloud"
 PerianOrg: "perian-org"
 PerianAuthToken: "perian-bearer-auth-token"
-KubeletPort: "kubelet-port"
-NodeName: "node-name"
-InternalIP: "node-internal-ip"
+KubeletPort: "8080"
+NodeName: "perian-vk-node"
+InternalIP: "127.0.0.1"
+KubernetesSecretName: "my-docker-secret"
 ```
 
 ### 4. Create a Pod definition file to deploy Virtual Kubelet
@@ -100,4 +101,19 @@ spec:
 
 ```bash
 kubectl apply -f pod.yaml
+```
+
+### Optional: Adding docker registry credentials
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: docker-secret
+  namespace: default
+type: Opaque
+data:
+  registryURL: "base64_encoded_url"
+  username: "base64_encoded_username"
+  password: "base64_encoded_password"
 ```

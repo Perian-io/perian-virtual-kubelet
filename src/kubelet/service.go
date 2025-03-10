@@ -114,15 +114,16 @@ func InitProvider(
 	kubeletPort int32,
 	internalIP string,
 	kubeClient *kubernetes.Clientset,
-
+	kubernetesSecretName string,
 ) Provider {
 	provider := Provider{
-		jobClient:       jobClient,
-		operatingSystem: operatingSystem,
-		node:            &node,
-		kubeletPort:     kubeletPort,
-		internalIP:      internalIP,
-		clientSet:       kubeClient,
+		jobClient:            jobClient,
+		operatingSystem:      operatingSystem,
+		node:                 &node,
+		kubeletPort:          kubeletPort,
+		internalIP:           internalIP,
+		clientSet:            kubeClient,
+		kubernetesSecretName: kubernetesSecretName,
 	}
 	provider.perianPods = make(map[string]PerianPod)
 	return provider
@@ -394,8 +395,8 @@ func GetPodContainerName(pod *corev1.Pod) string {
 }
 
 // GetDockerSecrets gets docker registry credentials from the Kubernetes Secrets.
-func GetDockerSecrets(ctx context.Context, clientSet *kubernetes.Clientset) (*DockerSecret, error) {
-	dockerSecret, err := clientSet.CoreV1().Secrets("default").Get(ctx, "docker-secret", metav1.GetOptions{})
+func GetDockerSecrets(ctx context.Context, clientSet *kubernetes.Clientset, kubernetesSecretName string) (*DockerSecret, error) {
+	dockerSecret, err := clientSet.CoreV1().Secrets("default").Get(ctx, kubernetesSecretName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
