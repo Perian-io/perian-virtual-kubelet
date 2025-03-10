@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -164,7 +165,9 @@ func GetRequestInstanceTypeQuery(jobResources JobResources) perian_client.Instan
 	memoryQueryInput := GetMemoryQuery(jobResources.memory)
 	instanceTypeQuery.SetRam(memoryQueryInput)
 	acceleratorQueryInput := GetAcceleratorQuery(jobResources.accelerators, jobResources.acceleratorType)
-	instanceTypeQuery.SetAccelerator(*acceleratorQueryInput)
+	if acceleratorQueryInput != nil {
+		instanceTypeQuery.SetAccelerator(*acceleratorQueryInput)
+	}
 	return *instanceTypeQuery
 }
 
@@ -374,17 +377,24 @@ func GetJobResources(pod *corev1.Pod) JobResources {
 	requestedResources := pod.Spec.Containers[0].Resources.Requests
 	cpu := requestedResources.Cpu().Value()
 	memory := requestedResources.Memory().Value()
+	memoryStr := GetMemoryValueString(memory)
 	accelerators, err := strconv.ParseInt(pod.Annotations["accelerators"], 10, 64)
 	if err != nil {
 	}
 	acceleratorType := pod.Annotations["acceleratorType"]
 	jobResources := JobResources{
 		cpu:             int32(cpu),
-		memory:          strconv.Itoa(int(memory)),
+		memory:          memoryStr,
 		accelerators:    int32(accelerators),
 		acceleratorType: acceleratorType,
 	}
 	return jobResources
+}
+
+func GetMemoryValueString(bytes int64) string {
+	gb := float64(bytes) / 1073741824
+	roundedGb := int(math.Ceil(gb))
+	return strconv.Itoa(roundedGb)
 }
 
 func stringToReadCloser(s string) io.ReadCloser {
