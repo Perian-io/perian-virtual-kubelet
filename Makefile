@@ -3,3 +3,6 @@ build:
 
 build-docker:
 	docker build -f docker/Dockerfile -t perian-virtual-kubelet:latest .
+
+test:
+	go test src/test/.

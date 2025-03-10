@@ -43,13 +43,9 @@ func NewProvider(
 func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	imageName := GetPodImageName(pod)
 	fullName := GeneratePodKey(pod)
-	dockerSecret, err := GetDockerSecrets(ctx, p.clientSet)
-	if err != nil {
-		pod.Status = PodPhase(perian.JOBSTATUS_SERVER_ERROR, p.internalIP)
-		return err
-	}
+	dockerSecret, _ := GetDockerSecrets(ctx, p.clientSet)
 	jobResources := GetJobResources(pod)
-	jobId, err := CreatePerianJob(ctx, p.jobClient, imageName, *dockerSecret, jobResources)
+	jobId, err := CreatePerianJob(ctx, p.jobClient, imageName, dockerSecret, jobResources)
 	if err != nil {
 		pod.Status = PodPhase(perian.JOBSTATUS_SERVER_ERROR, p.internalIP)
 		return err

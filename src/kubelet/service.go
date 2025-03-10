@@ -134,7 +134,7 @@ func CreatePerianJob(
 	ctx context.Context,
 	jobClient *perian_client.JobAPIService,
 	imageName string,
-	dockerSecret DockerSecret,
+	dockerSecret *DockerSecret,
 	jobResources JobResources,
 ) (string, error) {
 	createJobAPI := jobClient.CreateJob(ctx)
@@ -142,7 +142,9 @@ func CreatePerianJob(
 	dockerRegistryCredentials := GetRequestDockerRegistryCredentials(dockerSecret)
 	dockerRunParameters := GetRequestDockerRunParameters(imageName)
 	instanceTypeQuery := GetRequestInstanceTypeQuery(jobResources)
-	createJobRequest.SetDockerRegistryCredentials(dockerRegistryCredentials)
+	if dockerRegistryCredentials != nil {
+		createJobRequest.SetDockerRegistryCredentials(*dockerRegistryCredentials)
+	}
 	createJobRequest.SetDockerRunParameters(dockerRunParameters)
 	createJobRequest.SetRequirements(instanceTypeQuery)
 	createJobAPI = createJobAPI.CreateJobRequest(*createJobRequest)
@@ -155,12 +157,15 @@ func CreatePerianJob(
 }
 
 // GetRequestDockerRegistryCredentials returns the docker registry credentials for the create job request.
-func GetRequestDockerRegistryCredentials(dockerSecret DockerSecret) perian_client.DockerRegistryCredentials {
-	dockerRegistryCredentials := perian_client.NewDockerRegistryCredentials()
-	dockerRegistryCredentials.SetUrl(dockerSecret.registryURL)
-	dockerRegistryCredentials.SetUsername(dockerSecret.username)
-	dockerRegistryCredentials.SetPassword(dockerSecret.password)
-	return *dockerRegistryCredentials
+func GetRequestDockerRegistryCredentials(dockerSecret *DockerSecret) *perian_client.DockerRegistryCredentials {
+	if dockerSecret != nil {
+		dockerRegistryCredentials := perian_client.NewDockerRegistryCredentials()
+		dockerRegistryCredentials.SetUrl(dockerSecret.registryURL)
+		dockerRegistryCredentials.SetUsername(dockerSecret.username)
+		dockerRegistryCredentials.SetPassword(dockerSecret.password)
+		return dockerRegistryCredentials
+	}
+	return nil
 }
 
 // GetRequestDockerRunParameters returns the docker run parameters for the create job request.

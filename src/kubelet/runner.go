@@ -79,6 +79,10 @@ func LoadConfig(ctx context.Context) (config Config, err error) {
 	if podIp != "" {
 		config.InternalIP = podIp
 	}
+
+	if config.PerianServerURL == "" {
+		config.PerianServerURL = "https://api.perian.cloud"
+	}
 	return config, nil
 }
 
