@@ -10,9 +10,9 @@ This project integrates a Virtual Kubelet with the Perian Sky Platform, enabling
 
 This integration enables you to **extend the Kubernetes API** to interact with the Perian Sky platform, automatically managing the scheduling and execution of jobs in a serverless GPU environment. By utilizing this approach, you can efficiently manage resources and achieve cost-effective scaling of your GPU workloads.
 
-## Status: Experimental
+## Status: <span style="color: orange;">Experimental</span>
 
-This provider is currently in the experimental stages. Contributions welcome!
+This provider is currently in the experimental stages.
 
 ## Quick Start
 
