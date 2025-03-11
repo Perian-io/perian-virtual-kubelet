@@ -5,43 +5,52 @@ name: Go
 
 on:
   release:
-    types: [created, published]  # Trigger when a release is created or published
-
+    types: [created, published] # Trigger when a release is created or published
 
 jobs:
-
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.20'
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.23"
 
-    - name: Build
-      run: make build
+      - name: Build
+        run: make build
 
-    - name: Build docker image
-      run: make build-docker
-      # Log in to GitHub Container Registry (GHCR)
-    - name: Log in to GHCR
-      uses: docker/login-action@v2
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}  # GitHub token automatically provided
+      - name: Build docker image
+        run: make build-docker
+        # Log in to GitHub Container Registry (GHCR)
+      - name: Log in to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }} # GitHub token automatically provided
 
-    # Tag the Docker image with the proper GHCR format
-    - name: Tag Docker image
-      run: |
-        IMAGE_NAME="ghcr.io/${{ github.repository }}/perian-virtual-kubelet:latest"
-        docker tag perian-virtual-kubelet:latest $IMAGE_NAME
-        echo "Image tagged as $IMAGE_NAME"
+      # Tag the Docker image with the proper GHCR format
+      - name: Tag Docker image
+        run: |
+          RELEASE_TAG="${{ github.event.release.tag_name }}"
+          IMAGE_NAME="ghcr.io/${{ github.repository }}/perian-virtual-kubelet:${RELEASE_TAG}"
+          LATEST_IMAGE_NAME="ghcr.io/${{ github.repository }}/perian-virtual-kubelet:latest"
 
-    # Push the Docker image to GitHub Container Registry (GHCR)
-    - name: Push Docker image to GHCR
-      run: |
-        IMAGE_NAME="ghcr.io/${{ github.repository }}/perian-virtual-kubelet:latest"
+          # Tag the image with both release version and latest
+          docker tag perian-virtual-kubelet:latest $IMAGE_NAME
+          docker tag perian-virtual-kubelet:latest $LATEST_IMAGE_NAME
+
+          echo "Image tagged as $IMAGE_NAME and $LATEST_IMAGE_NAME"
+
+      # Push the Docker image to GitHub Container Registry (GHCR)
+      - name: Push Docker image to GHCR
+        run: |
+          RELEASE_TAG="${{ github.event.release.tag_name }}"
+          IMAGE_NAME="ghcr.io/${{ github.repository }}/perian-virtual-kubelet:${RELEASE_TAG}"
+          LATEST_IMAGE_NAME="ghcr.io/${{ github.repository }}/perian-virtual-kubelet:latest"
+
+          # Push both the release version and latest tags to GHCR
           docker push $IMAGE_NAME
+          docker push $LATEST_IMAGE_NAME
