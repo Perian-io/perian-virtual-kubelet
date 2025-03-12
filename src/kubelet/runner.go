@@ -86,7 +86,7 @@ func LoadConfig(ctx context.Context) (config Config, err error) {
 	return config, nil
 }
 
-// LoadConfigFile loads the Perian VK configurations and checks if an error has occured.
+// LoadConfigFile loads the Perian VK configurations and checks if an error has occurred.
 func LoadConfigFile(ctx context.Context) Config {
 	config, err := LoadConfig(ctx)
 	if err != nil {

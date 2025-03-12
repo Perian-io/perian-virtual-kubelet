@@ -618,7 +618,7 @@ func GetContainerStateRunning(startedAt *time.Time) corev1.ContainerState {
 	}
 }
 
-// GetContainerSteteFailed returns a contianer state (Terminated) with reason job failed.
+// GetContainerSteteFailed returns a container state (Terminated) with reason job failed.
 func GetContainerStateFailed() corev1.ContainerState {
 	return corev1.ContainerState{
 		Terminated: &corev1.ContainerStateTerminated{
