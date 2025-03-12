@@ -1,6 +1,6 @@
 # Kubernetes Virtual Kubelet with Perian Sky Platform
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/Perian-io/perian-virtual-kubelet)](https://goreportcard.com/report/github.com/Perian-io/perian-virtual-kubelet)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Perian-io/perian-virtual-kubelet)](https://goreportcard.com/report/github.com/Perian-io/perian-virtual-kubelet) ![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/Perian-io/perian-virtual-kubelet?sort=semver)
 
 This project integrates a Virtual Kubelet with the Perian Sky Platform, enabling seamless execution of Kubernetes workloads in a serverless, GPU-powered environment. By leveraging the power of the Virtual Kubelet, Kubernetes users can now run their workloads as jobs on the Perian Sky Platform, which provides a highly scalable, cost-effective, and flexible serverless infrastructure for GPU-accelerated tasks.
 
